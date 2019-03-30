@@ -47,10 +47,12 @@ namespace BuildXL.FrontEnd.Ninja
         internal AbsolutePath SpecFile;
 
 
+        internal FileAccessManifest BaseFileAccessManifest;
+
         // The build targets this workspace resolver knows about after initialization
         // For now this means we will build all of these
-        private string[] m_targets; 
- 
+        private string[] m_targets;
+
         // AsyncLazy graph
         private Lazy<Task<Possible<NinjaGraphWithModuleDefinition>>> m_graph;
         private readonly ConcurrentDictionary<AbsolutePath, SourceFile> m_createdSourceFiles =
@@ -95,7 +97,7 @@ namespace BuildXL.FrontEnd.Ninja
             return Task.FromResult(Possible.Create((ISourceFile)GetOrCreateSourceFile(pathToParse)));
         }
 
-        
+
         private SourceFile GetOrCreateSourceFile(AbsolutePath path)
         {
             Contract.Assert(path.IsValid);
@@ -167,7 +169,8 @@ namespace BuildXL.FrontEnd.Ninja
         /// </summary>
         public Possible<NinjaGraphWithModuleDefinition> ComputedGraph
         {
-            get { 
+            get
+            {
                 Contract.Assert(m_graph != null && m_graph.IsValueCreated, "The computation of the build graph should have been triggered to be able to retrieve this value");
                 return m_graph.Value.Result;
             }
@@ -219,9 +222,17 @@ namespace BuildXL.FrontEnd.Ninja
         {
             InitializeInterpreter(host, context, configuration);
             m_resolverSettings = resolverSettings as INinjaResolverSettings;
-            
+
             Contract.Assert(m_resolverSettings != null);
 
+            BaseFileAccessManifest = new FileAccessManifest(Context.PathTable)
+            {
+                FailUnexpectedFileAccesses = false,
+                ReportFileAccesses = true,
+                MonitorNtCreateFile = true,
+                MonitorZwCreateOpenQueryFile = true,
+                MonitorChildProcesses = true,
+            };
             return TryInitializeWorkspaceValues();
         }
 
@@ -261,7 +272,7 @@ namespace BuildXL.FrontEnd.Ninja
                 Tracing.Logger.Log.NinjaSpecFileDoesNotExist(Context.LoggingContext, m_resolverSettings.Location(Context.PathTable), path);
                 return false;
             }
-    
+
             m_targets = m_resolverSettings.Targets != null ? m_resolverSettings.Targets.AsArray() : CollectionUtilities.EmptyArray<string>();
             return true;
         }
@@ -269,20 +280,20 @@ namespace BuildXL.FrontEnd.Ninja
         private async Task<Possible<NinjaGraphWithModuleDefinition>> TryComputeBuildGraphAsync()
         {
             Possible<NinjaGraphResult> maybeGraph = await ComputeBuildGraphAsync();
-            
+
             var result = maybeGraph.Result;
             var specFileConfig = SpecFile.ChangeExtension(Context.PathTable, PathAtom.Create(Context.StringTable, ".ninja.dsc"));   // It needs to be a .dsc for the parsing to work
 
-            var moduleDescriptor = ModuleDescriptor.CreateWithUniqueId(m_resolverSettings.ModuleName, this);   
+            var moduleDescriptor = ModuleDescriptor.CreateWithUniqueId(m_resolverSettings.ModuleName, this);
             var moduleDefinition = ModuleDefinition.CreateModuleDefinitionWithImplicitReferences(
                 moduleDescriptor,
                 ProjectRoot,
                 m_resolverSettings.File,
-                new List<AbsolutePath>() { specFileConfig } ,
+                new List<AbsolutePath>() { specFileConfig },
                 allowedModuleDependencies: null, // no module policies
                 cyclicalFriendModules: null); // no whitelist of cycles
 
-            return new NinjaGraphWithModuleDefinition(result.Graph, moduleDefinition);            
+            return new NinjaGraphWithModuleDefinition(result.Graph, moduleDefinition);
         }
 
         private async Task<Possible<NinjaGraphResult>> ComputeBuildGraphAsync()
@@ -314,14 +325,14 @@ namespace BuildXL.FrontEnd.Ninja
                     m_resolverSettings.Location(Context.PathTable),
                     standardError);
             }
-            
+
             FrontEndUtilities.TrackToolFileAccesses(Engine, Context, m_frontEnd.Name, result.AllUnexpectedFileAccesses, outputFile.GetParent(Context.PathTable));
             var serializer = JsonSerializer.Create(GraphSerializationSettings.Settings);
-            
+
             // Add custom deserializer for converting string arrays to AbsolutePath ReadOnlySets
             serializer.Converters.Add(new RootAwareAbsolutePathConverter(Context.PathTable, SpecFile.GetParent(Context.PathTable)));
             serializer.Converters.Add(new ToReadOnlySetJsonConverter<AbsolutePath>());
-            
+
             var outputFileString = outputFile.ToString(Context.PathTable);
             Tracing.Logger.Log.LeftGraphToolOutputAt(Context.LoggingContext, m_resolverSettings.Location(Context.PathTable), outputFileString);
 
@@ -382,12 +393,12 @@ namespace BuildXL.FrontEnd.Ninja
         private void SerializeToolArguments(AbsolutePath outputFile, AbsolutePath argumentsFile)
         {
             var arguments = new NinjaGraphToolArguments()
-                            {
-                                BuildFileName = SpecFile.ToString(Context.PathTable),
-                                ProjectRoot = SpecFile.GetParent(Context.PathTable).ToString(Context.PathTable),
-                                OutputFile = outputFile.ToString(Context.PathTable),
-                                Targets = m_targets
-                            };
+            {
+                BuildFileName = SpecFile.ToString(Context.PathTable),
+                ProjectRoot = SpecFile.GetParent(Context.PathTable).ToString(Context.PathTable),
+                OutputFile = outputFile.ToString(Context.PathTable),
+                Targets = m_targets
+            };
 
 
             var serializer = JsonSerializer.Create(GraphSerializationSettings.Settings);
@@ -414,14 +425,7 @@ namespace BuildXL.FrontEnd.Ninja
             // We make no attempt at understanding what the graph generation process is going to do
             // We just configure the manifest to not fail on unexpected accesses, so they can be collected
             // later if needed
-            var fileAccessManifest = new FileAccessManifest(Context.PathTable)
-            {
-                FailUnexpectedFileAccesses = false,
-                ReportFileAccesses = true,
-                MonitorNtCreateFile = true,
-                MonitorZwCreateOpenQueryFile = true,
-                MonitorChildProcesses = true,
-            };
+            var fileAccessManifest = BaseFileAccessManifest;
 
             fileAccessManifest.AddScope(
                 AbsolutePath.Create(Context.PathTable, SpecialFolderUtilities.GetFolderPath(Environment.SpecialFolder.Windows)),
@@ -438,7 +442,7 @@ namespace BuildXL.FrontEnd.Ninja
                 FileAccessPolicy.MaskAll,
                 FileAccessPolicy.AllowAll);
 
-            fileAccessManifest.AddScope(toolDirectory, FileAccessPolicy.MaskAll, FileAccessPolicy.AllowReadAlways);            
+            fileAccessManifest.AddScope(toolDirectory, FileAccessPolicy.MaskAll, FileAccessPolicy.AllowReadAlways);
             return fileAccessManifest;
         }
 

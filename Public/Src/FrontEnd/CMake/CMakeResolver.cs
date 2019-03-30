@@ -33,7 +33,7 @@ namespace BuildXL.FrontEnd.CMake
 
         // TODO: Multiple modules
         private ModuleDefinition ModuleDef => m_cMakeWorkspaceResolver.EmbeddedNinjaWorkspaceResolver.ComputedGraph.Result.ModuleDefinition;
-        
+
         /// <nodoc/>
         public CMakeResolver(
             GlobalConstants constants,
@@ -56,9 +56,9 @@ namespace BuildXL.FrontEnd.CMake
             Contract.Requires(resolverSettings != null);
             Name = resolverSettings.Name;
 
-            m_cMakeResolverSettings = resolverSettings as ICMakeResolverSettings; 
+            m_cMakeResolverSettings = resolverSettings as ICMakeResolverSettings;
             m_cMakeWorkspaceResolver = workspaceResolver as CMakeWorkspaceResolver;
-            
+
             // TODO: Failure cases, logging
             return Task.FromResult<bool>(true);
         }
@@ -91,14 +91,15 @@ namespace BuildXL.FrontEnd.CMake
         {
             NinjaGraphWithModuleDefinition result = m_cMakeWorkspaceResolver.ComputedGraph.Result;
             IReadOnlyCollection<NinjaNode> filteredNodes = result.Graph.Nodes;
-            var graphConstructor = new NinjaPipGraphBuilder(Context, FrontEndHost, ModuleDef, 
-                m_cMakeWorkspaceResolver.EmbeddedNinjaWorkspaceResolver.ProjectRoot, 
-                m_cMakeWorkspaceResolver.EmbeddedNinjaWorkspaceResolver.SpecFile, 
-                qualifierId, 
-                m_frontEndName, 
+            var graphConstructor = new CMakePipGraphBuilder(Context, FrontEndHost, ModuleDef,
+                m_cMakeWorkspaceResolver.EmbeddedNinjaWorkspaceResolver.ProjectRoot,
+                m_cMakeWorkspaceResolver.CmakeAccesses,
+                m_cMakeWorkspaceResolver.EmbeddedNinjaWorkspaceResolver.SpecFile,
+                qualifierId,
+                m_frontEndName,
                 m_cMakeResolverSettings.RemoveAllDebugFlags ?? false,
-                m_cMakeResolverSettings.UntrackingSettings);
-            return graphConstructor.TrySchedulePips(filteredNodes, qualifierId);
+                m_cMakeResolverSettings);
+            return graphConstructor.TrySchedulePips(filteredNodes, result.Graph.Targets, qualifierId);
         }
 
         /// <inheritdoc/>
@@ -106,6 +107,6 @@ namespace BuildXL.FrontEnd.CMake
         {
             // Nothing to do.
         }
-       
+
     }
 }

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.ContractsLight;
 using BuildXL.Utilities;
@@ -18,6 +19,7 @@ namespace BuildXL.FrontEnd.Ninja.Serialization
     /// </remarks>
     [JsonObject]
     public sealed class NinjaNode
+        : IEquatable<NinjaNode>
     {
         /// <nodoc/>
         [JsonProperty(PropertyName = "rule")]
@@ -71,12 +73,72 @@ namespace BuildXL.FrontEnd.Ninja.Serialization
             Outputs = outputs;
             Dependencies = dependencies;
         }
+
+        /// <nodoc />
+        [JsonConstructor]
+        public NinjaNode(string rule, string command, IReadOnlySet<AbsolutePath> inputs, IReadOnlySet<AbsolutePath> outputs, IReadOnlyCollection<NinjaNode> dependencies, NinjaResponseFile? responseFile)
+        {
+            Rule = rule;
+            Inputs = inputs;
+            Command = command;
+            Outputs = outputs;
+            Dependencies = dependencies;
+            ResponseFile = responseFile;
+        }
+
+        public static bool operator ==(NinjaNode left, NinjaNode right)
+        {
+            return Equals(left, right);
+        }
+
+        public static bool operator !=(NinjaNode left, NinjaNode right)
+        {
+            return !(left == right);
+        }
+
+        public bool Equals(NinjaNode other)
+        {
+            if (ReferenceEquals(null, other))
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(this, other))
+            {
+                return true;
+            }
+
+            return string.Equals(Rule, other.Rule) && string.Equals(Command, other.Command);
+        }
+
+        public override bool Equals(object obj)
+        {
+            if (ReferenceEquals(null, obj))
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(this, obj))
+            {
+                return true;
+            }
+
+            return obj is NinjaNode other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return ((Rule != null ? Rule.GetHashCode() : 0) * 397) ^ (Command != null ? Command.GetHashCode() : 0);
+            }
+        }
     }
 
     /// <summary>
     /// The contents of a response file for a ninja pip and where it is supposed to be written
     /// </summary>
-    [JsonObject(IsReference =  false)]
+    [JsonObject(IsReference = false)]
     public struct NinjaResponseFile
     {
         /// <summary>
@@ -90,5 +152,5 @@ namespace BuildXL.FrontEnd.Ninja.Serialization
         /// </summary>
         [JsonProperty(PropertyName = "content")]
         public string Content { get; private set; }
-    } 
+    }
 }

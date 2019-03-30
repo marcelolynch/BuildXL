@@ -65,6 +65,7 @@ namespace BuildXL.FrontEnd.CMake
         internal readonly NinjaWorkspaceResolver EmbeddedNinjaWorkspaceResolver;
         private readonly Lazy<NinjaResolverSettings> m_embeddedResolverSettings;
         private bool m_ninjaWorkspaceResolverInitialized;
+        internal ISet<ReportedFileAccess> CmakeAccesses;
 
         internal Possible<NinjaGraphWithModuleDefinition> ComputedGraph => EmbeddedNinjaWorkspaceResolver.ComputedGraph;
 
@@ -164,11 +165,18 @@ namespace BuildXL.FrontEnd.CMake
                 return true;
             }
 
-            return (m_ninjaWorkspaceResolverInitialized = EmbeddedNinjaWorkspaceResolver.TryInitialize(
+            m_ninjaWorkspaceResolverInitialized = EmbeddedNinjaWorkspaceResolver.TryInitialize(
                 FrontEndHost,
                 Context,
                 Configuration,
-                m_embeddedResolverSettings.Value));
+                m_embeddedResolverSettings.Value);
+
+            if (m_ninjaWorkspaceResolverInitialized)
+            {
+                EmbeddedNinjaWorkspaceResolver.BaseFileAccessManifest.AddScope(m_buildDirectory, FileAccessPolicy.MaskAll, FileAccessPolicy.AllowAllButSymlinkCreation);
+            }
+
+            return m_ninjaWorkspaceResolverInitialized;
         }
 
         private async Task<Possible<Unit>> GenerateBuildDirectoryAsync()
@@ -199,7 +207,26 @@ namespace BuildXL.FrontEnd.CMake
             }
 
             FrontEndUtilities.TrackToolFileAccesses(Engine, Context, m_frontEnd.Name, result.AllUnexpectedFileAccesses, outputDirectory);
+
+            CmakeAccesses = result.FileAccesses.Where(fa => AbsolutePath.TryCreate(Context.PathTable, fa.GetPath(Context.PathTable), out var faAbsolutePath) && !faAbsolutePath.IsWithin(Context.PathTable, outputDirectory)).ToReadOnlySet();
             return Possible.Create(Unit.Void);
+        }
+
+        internal ICollection<AbsolutePath> CMakeGeneratedFiles = new List<AbsolutePath>();
+        private void TrackOutputFiles(ISet<ReportedFileAccess> fileAccesses)
+        {
+            foreach (var access in fileAccesses)
+            {
+                string accessPath = access.GetPath(Context.PathTable);
+                if (AbsolutePath.TryCreate(Context.PathTable, accessPath, out AbsolutePath path))
+                {
+                    if (path.IsWithin(Context.PathTable, m_buildDirectory) && (access.RequestedAccess & RequestedAccess.Read) != 0)
+                    {
+                        CMakeGeneratedFiles.Add(path);
+                    }
+
+                }
+            }
         }
 
         private Task<SandboxedProcessResult> ExecuteCMakeRunner(AbsolutePath argumentsFile, IEnumerable<AbsolutePath> searchLocations)
@@ -377,13 +404,19 @@ namespace BuildXL.FrontEnd.CMake
             fileAccessManifest.AddScope(
                 AbsolutePath.Create(Context.PathTable, SpecialFolderUtilities.GetFolderPath(Environment.SpecialFolder.UserProfile)),
                 FileAccessPolicy.MaskAll,
+                FileAccessPolicy.AllowAll);
+
+            fileAccessManifest.AddScope(
+                m_buildDirectory,
+                FileAccessPolicy.MaskAll,
                 FileAccessPolicy.AllowAllButSymlinkCreation);
+
 
             fileAccessManifest.AddScope(
                 m_resolverSettings.ProjectRoot.Combine(Context.PathTable, ".git"),
                 FileAccessPolicy.MaskAll,
                 FileAccessPolicy.AllowAllButSymlinkCreation);
-            
+
             return fileAccessManifest;
         }
     }

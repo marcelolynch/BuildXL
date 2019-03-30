@@ -51,7 +51,7 @@ namespace BuildXL.FrontEnd.Ninja
         /// </summary>
         private readonly Lazy<AbsolutePath> m_manuallyDroppedDependenciesPath;
 
-        
+
         /// We expose all the environment to the processes so we can get these values lazily
         private Lazy<IEnumerable<KeyValuePair<string, string>>> m_environmentVariables;
         private Lazy<IEnumerable<KeyValuePair<string, string>>> m_passThroughEnvironmentVariables;
@@ -82,7 +82,7 @@ namespace BuildXL.FrontEnd.Ninja
             m_passThroughEnvironmentVariables = Lazy.Create(() => allEnvironmentVariables.Value.Where(kvp => SpecialEnvironmentVariables.PassThroughPrefixes.Any(prefix => kvp.Key.StartsWith(prefix))));
         }
 
-        internal bool TrySchedulePip(NinjaNode node, QualifierId qualifierId, out Process process)
+        internal bool TrySchedulePip(NinjaNode node, QualifierId qualifierId, out Process process, bool optionalOutputs = false)
         {
             try
             {
@@ -90,7 +90,7 @@ namespace BuildXL.FrontEnd.Ninja
                 if (!TryBuildProcessAndSchedulePip(
                     node,
                     qualifierId,
-                    out process))
+                    out process, optionalOutputs))
                 {
                     Tracing.Logger.Log.PipSchedulingFailed(m_context.LoggingContext, Location.FromFile(m_specPath.ToString(m_context.PathTable)));
                     return false;
@@ -148,7 +148,7 @@ namespace BuildXL.FrontEnd.Ninja
             return pipConstructionHelper;
         }
 
-        private bool TryBuildProcessAndSchedulePip(NinjaNode node, QualifierId qualifierId, out Process process)
+        private bool TryBuildProcessAndSchedulePip(NinjaNode node, QualifierId qualifierId, out Process process, bool optionalOutputs)
         {
             process = null;
             if (node.Rule.Equals("phony"))
@@ -167,7 +167,7 @@ namespace BuildXL.FrontEnd.Ninja
                 }
 
                 // Process all outputs and inputs
-                AddOutputs(node, processBuilder);
+                AddOutputs(node, processBuilder, optionalOutputs);
                 AddInputs(node, processBuilder);
 
                 // Try to schedule the process pip
@@ -212,22 +212,29 @@ namespace BuildXL.FrontEnd.Ninja
                         processBuilder.AddInputFile(output);
                     }
                 }
+
+                // Depend also on the shared opaque
+                foreach (StaticDirectory output in processOutputs.GetOutputDirectories())
+                {
+                    processBuilder.AddInputDirectory(output.Root);
+                }
             }
         }
 
 
-        private void AddOutputs(NinjaNode node, ProcessBuilder processBuilder)
+        private void AddOutputs(NinjaNode node, ProcessBuilder processBuilder, bool optionalOutputs)
         {
+            var attribute = optionalOutputs ? FileExistence.Optional : FileExistence.Required;
             foreach (AbsolutePath output in node.Outputs)
             {
                 FileArtifact file;
                 if (m_outputFileArtifacts.TryGetValue(output, out file))
                 {
-                    processBuilder.AddOutputFile(file, FileExistence.Required);
+                    processBuilder.AddOutputFile(file, attribute);
                 }
                 else
                 {
-                    processBuilder.AddOutputFile(output, FileExistence.Required);
+                    processBuilder.AddOutputFile(output, attribute);
                 }
             }
 
@@ -278,7 +285,7 @@ namespace BuildXL.FrontEnd.Ninja
 
             // TODO: Maybe a better description. Add ninja description or change command for input/outputs
             processBuilder.ToolDescription = StringId.Create(m_context.StringTable,
-                I($"{m_moduleDefinition.Descriptor.Name} - {node.Rule} - {executable} :: [{node.Command}]"));
+                I($"{m_moduleDefinition.Descriptor.Name} - {node.Rule} - {executable}]"));
 
 
             processBuilder.Options |= Process.Options.AllowUndeclaredSourceReads | Process.Options.OutputsMustRemainWritable | Process.Options.OutputsMustRemainWritable;
